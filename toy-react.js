@@ -2,22 +2,48 @@
  * @Author: songyzh
  * @Date: 2020-11-26 11:31:21
  * @LastEditors: songyzh
- * @LastEditTime: 2020-11-30 17:19:45
+ * @LastEditTime: 2020-12-01 15:50:01
  */
+// 使用symbol模拟私有
+const RENDER_TO_DOM = Symbol("render to dom");
 class ElementWrapper {
   constructor(type) {
     this.root = document.createElement(type);
   }
   setAttribute(name, value) {
-    this.root.setAttribute(name, value);
+    if (name.match(/^on([\s\S]+)/)) {
+      RegExp.$1;
+      this.root.addEventListener(
+        RegExp.$1.replace(/^[\s\S]/, (c) => c.toLowerCase()),
+        value
+      );
+    } else {
+      if (name === "className") {
+        this.root.setAttribute("class", value);
+      } else {
+        this.root.setAttribute(name, value);
+      }
+    }
   }
   appendChild(component) {
-    this.root.appendChild(component.root);
+    let range = document.createRange();
+    range.setStart(this.root, this.root.childNodes.length);
+    range.setEnd(this.root, this.root.childNodes.length);
+    component[RENDER_TO_DOM](range);
+  }
+  [RENDER_TO_DOM](range) {
+    range.deleteContents();
+    range.insertNode(this.root);
   }
 }
+
 class TextWrapper {
   constructor(content) {
     this.root = document.createTextNode(content);
+  }
+  [RENDER_TO_DOM](range) {
+    range.deleteContents();
+    range.insertNode(this.root);
   }
 }
 
@@ -26,6 +52,7 @@ export class Component {
     this._root = null;
     this.props = Object.create(null);
     this.children = [];
+    this._range = null;
   }
   setAttribute(name, value) {
     this.props[name] = value;
@@ -33,13 +60,40 @@ export class Component {
   appendChild(component) {
     this.children.push(component);
   }
-
-  get root() {
-    if (!this._root) {
-      this._root = this.render().root;
-    }
-    return this._root;
+  [RENDER_TO_DOM](range) {
+    this._range = range;
+    this.render()[RENDER_TO_DOM](range);
   }
+
+  rerender() {
+    this._range.deleteContents();
+    this[RENDER_TO_DOM](this._range);
+  }
+
+  setState(newState) {
+    if (this.state === null || typeof this.state !== "object") {
+      this.state = newState;
+      this.rerender();
+      return;
+    }
+    let merge = (oldState, newState) => {
+      for (let p in newState) {
+        if (oldState[p] === null || typeof oldState[p] !== "object") {
+          oldState[p] = newState[p];
+        } else {
+          merge(oldState[p], newState[p]);
+        }
+      }
+    };
+    merge(this.state, newState);
+    this.rerender();
+  }
+  // get root() {
+  //   if (!this._root) {
+  //     this._root = this.render().root;
+  //   }
+  //   return this._root;
+  // }
 }
 
 export function createElement(type, attributes, ...children) {
@@ -58,6 +112,9 @@ export function createElement(type, attributes, ...children) {
       if (typeof child === "string") {
         child = new TextWrapper(child);
       }
+      if (child === null) {
+        continue;
+      }
       if (typeof child === "object" && child instanceof Array) {
         insertChildren(child);
       } else {
@@ -70,5 +127,10 @@ export function createElement(type, attributes, ...children) {
 }
 
 export function render(component, parentELement) {
-  parentELement.appendChild(component.root);
+  // parentELement.appendChild(component.root);
+  let range = document.createRange();
+  range.setStart(parentELement, 0);
+  range.setEnd(parentELement, parentELement.childNodes.length);
+  range.deleteContents();
+  component[RENDER_TO_DOM](range);
 }
